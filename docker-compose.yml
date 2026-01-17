@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  signal-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    container_name: signal-cli-rest-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - MODE=normal
+    volumes:
+      - ./signal-cli-config:/home/.local/share/signal-cli
+    networks:
+      - ralph-network
+
+networks:
+  ralph-network:
+    name: ralph-network
+    driver: bridge
