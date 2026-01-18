@@ -1,190 +1,128 @@
-# Ralph Workflow: Parallel AI Coding with Signal Notifications
+# Ralph Workflow
 
-Run multiple AI coding agents in parallel, each in a sandboxed Docker container, working on separate git worktrees. Get Signal messages when Claude needs input or finishes.
+A bash loop for autonomous AI coding with Claude Code. Each iteration gets fresh context, preventing memory bloat. Get Signal notifications when Claude is done or stuck.
 
-## Architecture
-
+## How It Works
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  HOST MACHINE (macOS)                                               │
-│                                                                     │
-│  ~/projects/myapp/                    (main repo - don't touch)     │
-│  ~/worktrees/myapp/                                                 │
-│    ├── feature-auth/                  → Container 1                 │
-│    ├── feature-dashboard/             → Container 2                 │
-│    └── feature-payments/              → Container 3                 │
-│                                                                     │
-│  ~/ralph-workflow/                                                  │
-│    ├── docker-compose.yml             (signal-cli-rest-api)         │
-│    ├── ralph-start.sh                 (spin up new feature)         │
-│    ├── ralph-status.sh                (check running containers)    │
-│    └── prd-template.json              (copy to each worktree)       │
-│                                                                     │
-└───────────────────────────┬─────────────────────────────────────────┘
-                            │
-        ┌───────────────────┼───────────────────┐
-        ▼                   ▼                   ▼
-  ┌──────────┐        ┌──────────┐        ┌──────────┐
-  │Container1│        │Container2│        │Container3│
-  │feature-  │        │feature-  │        │feature-  │
-  │auth      │        │dashboard │        │payments  │
-  │          │        │          │        │          │
-  │ Claude   │        │ Claude   │        │ Claude   │
-  │ + Ralph  │        │ + Ralph  │        │ + Ralph  │
-  │ + Signal │        │ + Signal │        │ + Signal │
-  └────┬─────┘        └────┬─────┘        └────┬─────┘
-       │                   │                   │
-       └───────────────────┼───────────────────┘
-                           ▼
-                 signal-cli-rest-api
-                    (shared Docker)
-                           │
-                           ▼
-                      Your Phone
+ralph.sh loop:
+  1. Fresh Claude instance starts
+  2. Reads PRD.md (tasks to do)
+  3. Reads progress.txt (learnings from previous iterations)
+  4. Completes ONE task
+  5. Commits, updates PRD, logs progress
+  6. Exits → next iteration with fresh context
+  7. Repeat until all tasks complete
 ```
 
 ## Setup
 
-### 1. Prerequisites
-
+### 1. Clone this repo
 ```bash
-# Install Docker
-brew install --cask docker
-
-# Make sure Docker is running
-docker info
+git clone https://github.com/hangar2apps/ralph-workflow.git ~/ralph-workflow
 ```
 
-### 2. Clone this workflow
-
+### 2. Configure environment
 ```bash
-git clone <this-repo> ~/ralph-workflow
 cd ~/ralph-workflow
+cp .env.example .env
+nano .env
 ```
 
-### 3. Start signal-cli-rest-api
+Set your Signal numbers:
+```
+SIGNAL_API_URL=http://localhost:8080
+SIGNAL_BOT_NUMBER=+1XXXXXXXXXX
+SIGNAL_USER_NUMBER=+1XXXXXXXXXX
+```
 
+### 3. Start Signal API
 ```bash
 docker-compose up -d
-
-# Link your Signal account (first time only)
-curl -X GET "http://localhost:8080/v1/qrcodelink?device_name=ralph-bot" --output qrcode.png
-open qrcode.png
-# Scan with Signal app: Settings > Linked Devices > Link New Device
-
-# Verify it worked
-curl http://localhost:8080/v1/accounts
 ```
 
-### 4. Configure environment
-
+First time only - link your Signal account:
 ```bash
-cp .env.example .env
-# Edit .env with your values
+curl -X GET "http://localhost:8080/v1/qrcodelink?device_name=ralph-bot" -o qrcode.png
+open qrcode.png
+# Scan with Signal app: Settings > Linked Devices
 ```
 
 ## Usage
 
-### Start a new feature
-
+### 1. Create a worktree for your feature
 ```bash
-# Creates worktree, starts container, kicks off Ralph
-./ralph-start.sh myapp feature-auth "Implement user authentication with Supabase"
+cd ~/path/to/your/project
+git worktree add ~/worktrees/projectname/feature -b feature/feature-name
+cd ~/worktrees/projectname/feature
 ```
 
-This will:
-1. Create `~/worktrees/myapp/feature-auth/` from your repo
-2. Create a new git branch `feature/auth`
-3. Generate `plans/prd.json` from your description
-4. Start a Docker container with Claude Code
-5. Run Ralph loop until complete or max iterations
-
-### Check status
-
+### 2. Create a PRD
 ```bash
-./ralph-status.sh
+claude
 ```
 
-### Stop a feature
+Then tell Claude:
+```
+Create a PRD for: [describe your feature]
+```
 
+Claude will ask clarifying questions, then generate `PRD.md` and `progress.txt`.
+
+### 3. Run Ralph
 ```bash
-./ralph-stop.sh feature-auth
+~/ralph-workflow/ralph.sh 20
 ```
 
-### Review and merge when done
+The number is max iterations (default 10).
 
+### 4. When complete
 ```bash
-cd ~/worktrees/myapp/feature-auth
-git log --oneline  # See what Claude did
-git diff main      # Review changes
+# Review
+cd ~/worktrees/projectname/feature
+git log --oneline
+git diff main
 
-# If happy, merge
-cd ~/projects/myapp
-git merge feature/auth
-git worktree remove ~/worktrees/myapp/feature-auth
+# Merge
+cd ~/path/to/your/project
+git merge feature/feature-name
+
+# Clean up
+git worktree remove ~/worktrees/projectname/feature
 ```
 
-## File Structure in Each Worktree
+## Files
 
-```
-~/worktrees/myapp/feature-auth/
-├── plans/
-│   ├── prd.json           # Task list with pass/fail status
-│   └── progress.txt       # Claude's notes across iterations
-├── src/                   # Your actual code
-└── ...
-```
+| File | Purpose |
+|------|---------|
+| `ralph.sh` | Main bash loop |
+| `skills/prd/SKILL.md` | PRD generator skill for Claude |
+| `docker-compose.yml` | Signal API container |
+| `.env` | Your Signal configuration |
 
-## PRD Format
+## Documentation
 
-The PRD (Product Requirements Document) is how you tell Claude what to build:
+See [USAGE.md](./USAGE.md) for detailed walkthrough and troubleshooting.
 
-```json
-{
-  "feature": "User Authentication",
-  "description": "Implement auth with Supabase",
-  "stories": [
-    {
-      "id": 1,
-      "story": "User can sign up with email/password",
-      "acceptance": [
-        "Sign up form exists at /signup",
-        "Form validates email format",
-        "Password requires 8+ characters",
-        "Successful signup redirects to /dashboard",
-        "Error messages display for invalid input"
-      ],
-      "passes": false
-    },
-    {
-      "id": 2,
-      "story": "User can log in",
-      "acceptance": [
-        "Login form exists at /login",
-        "Successful login redirects to /dashboard",
-        "Invalid credentials show error"
-      ],
-      "passes": false
-    }
-  ]
-}
+## Requirements
+
+- [Claude Code](https://claude.ai/code) CLI installed
+- Docker (for Signal API)
+- Git
 ```
 
-## Signal Notifications
+**.env.example:**
+```
+# Signal Configuration
+SIGNAL_API_URL=http://localhost:8080
+SIGNAL_BOT_NUMBER=+1234567890
+SIGNAL_USER_NUMBER=+0987654321
+```
 
-Claude will message you when:
-- Starting a new task
-- Stuck and needs input
-- Completed a task
-- Finished all tasks
-- Hit an error it can't resolve
-
-Reply to the Signal message to give Claude direction.
-
-## Tips
-
-1. **Keep tasks small** - Each story should be completable in one iteration
-2. **Be specific** - Detailed acceptance criteria = better results
-3. **Check progress.txt** - See what Claude learned/struggled with
-4. **Review commits** - Claude commits after each completed story
-5. **Start with 1 container** - Get comfortable before parallelizing
+**USAGE.md** - just update lines 13-19 to:
+```
+Set your Signal numbers:
+```
+SIGNAL_API_URL=http://localhost:8080
+SIGNAL_BOT_NUMBER=+1XXXXXXXXXX
+SIGNAL_USER_NUMBER=+1XXXXXXXXXX
+```

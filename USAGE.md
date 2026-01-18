@@ -1,5 +1,26 @@
 # Ralph Workflow Usage Guide
 
+## Overview
+
+Ralph is a bash loop that runs Claude Code repeatedly, with a fresh context each iteration. Claude works through a PRD (Product Requirements Document) one task at a time until everything is complete.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  ralph.sh                                               │
+│                                                         │
+│  for each iteration:                                    │
+│    1. Fresh Claude instance starts                      │
+│    2. Reads PRD.md (what to do)                        │
+│    3. Reads progress.txt (what was learned)            │
+│    4. Does ONE task                                     │
+│    5. Commits, updates PRD, logs progress              │
+│    6. Exits → next iteration with fresh context        │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## One-Time Setup
 
 ### 1. Configure environment
@@ -10,162 +31,115 @@ cp .env.example .env
 nano .env
 ```
 
-Set these values:
+Set your Signal numbers:
 ```
-SIGNAL_API_URL=http://signal-cli-rest-api:8080
+SIGNAL_API_URL=http://localhost:9924
 SIGNAL_BOT_NUMBER=+1XXXXXXXXXX
 SIGNAL_USER_NUMBER=+1XXXXXXXXXX
-SIGNAL_ME_PLUGIN_PATH=~/Documents/Hangar2Apps-Github/signal-me
-WORKTREES_DIR=~/worktrees
-RALPH_MAX_ITERATIONS=30
 ```
 
-### 2. Start Signal API
+### 2. Create symlink (optional, for easier access)
+```bash
+ln -s ~/Documents/Hangar2Apps-Github/ralph-workflow ~/ralph-workflow
+```
 
+### 3. Ensure Signal API is running
+
+```bash
+docker ps | grep signal
+```
+
+If not running:
 ```bash
 cd ~/ralph-workflow
 docker-compose up -d
-```
-
-If you get a "container name already in use" error, your signal-me container is already running. Just connect it to the ralph network:
-
-```bash
-docker network connect ralph-network signal-cli-rest-api
-```
-
-### 3. Verify Signal API
-
-```bash
-curl http://localhost:8080/v1/about
-```
-
-If this is your first time, link your Signal account:
-```bash
-curl -X GET "http://localhost:8080/v1/qrcodelink?device_name=ralph-bot" -o qrcode.png
-open qrcode.png
-# Scan with Signal app: Settings > Linked Devices > Link New Device
 ```
 
 ---
 
 ## Starting a Feature
 
-### 1. Run ralph-start
+### Step 1: Create a worktree
 
 ```bash
-cd ~/ralph-workflow
-
-# Side projects
-./ralph-start.sh ~/Documents/Hangar2Apps-Github/PROJECT_NAME FEATURE_NAME "Description"
-
-# Work projects
-./ralph-start.sh ~/Documents/ITG-GitHub/PROJECT_NAME FEATURE_NAME "Description"
+cd ~/Documents/Hangar2Apps-Github/ScooperHero  # or your project
+git worktree add ~/worktrees/ScooperHero/ratings -b feature/ratings
 ```
 
-**Examples:**
+If branch already exists:
 ```bash
-./ralph-start.sh ~/Documents/Hangar2Apps-Github/scooperhero auth "Add user authentication with Supabase"
-./ralph-start.sh ~/Documents/ITG-GitHub/orapath dashboard "Build admin dashboard"
+git worktree add ~/worktrees/ScooperHero/ratings ratings
 ```
 
-### 2. (Optional) Edit PRD for detailed tasks
-
-The script creates a basic single-task PRD. For better results, break it into smaller stories:
+### Step 2: Go to the worktree
 
 ```bash
-nano ~/worktrees/PROJECT_NAME/FEATURE_NAME/plans/prd.json
+cd ~/worktrees/ScooperHero/ratings
 ```
 
-Example PRD with multiple stories:
-```json
-{
-  "feature": "auth",
-  "description": "Add user authentication with Supabase",
-  "tech_context": {
-    "frontend": "React/Next.js with TypeScript",
-    "styling": "Tailwind CSS",
-    "backend": "Supabase (Postgres + Auth + Edge Functions)",
-    "testing": "Run npm run typecheck and npm run lint after changes"
-  },
-  "stories": [
-    {
-      "id": 1,
-      "story": "User can sign up with email/password",
-      "acceptance": [
-        "Sign up form at /signup",
-        "Validates email format",
-        "Password requires 8+ chars",
-        "Creates user in Supabase"
-      ],
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": 2,
-      "story": "User can log in",
-      "acceptance": [
-        "Login form at /login",
-        "Redirects to /dashboard on success",
-        "Shows error on bad credentials"
-      ],
-      "passes": false,
-      "notes": ""
-    },
-    {
-      "id": 3,
-      "story": "User can log out",
-      "acceptance": [
-        "Logout button in header",
-        "Clears session",
-        "Redirects to /login"
-      ],
-      "passes": false,
-      "notes": ""
-    }
-  ]
-}
-```
+### Step 3: Create the PRD
 
-### 3. Watch logs
+Start Claude and use the PRD skill:
 
 ```bash
-docker logs -f ralph-PROJECT_NAME-FEATURE_NAME
+claude
 ```
 
-Example:
-```bash
-docker logs -f ralph-scooperhero-auth
+Then tell Claude:
 ```
+Create a PRD for: [describe your feature]
+```
+
+Claude will:
+1. Ask clarifying questions (answer with "1A, 2B, 3C" format)
+2. Generate `PRD.md` with properly sized user stories
+3. Create empty `progress.txt`
+
+Review the PRD before continuing:
+```bash
+cat PRD.md
+```
+
+### Step 4: Run Ralph
+
+```bash
+~/ralph-workflow/ralph.sh 20
+```
+
+The number is max iterations (default 10). Each iteration:
+- Fresh context (no memory bloat)
+- Does ONE task from PRD
+- Commits when done
+- Logs learnings to progress.txt
+- Sends Signal messages
+
+### Step 5: Monitor
+
+Watch the terminal output, or check your Signal for messages:
+- "Starting iteration - working on US-001"
+- "Stuck on [problem] - need help"
+- "All tasks complete!"
 
 ---
 
 ## While Running
 
-### Check status of all features
+### If Claude gets stuck
 
+Reply via Signal with guidance. Claude will see it next iteration via progress.txt learnings.
+
+Or stop Ralph (Ctrl+C), manually edit progress.txt with hints, restart.
+
+### If you need to pause
+
+Press `Ctrl+C` to stop. Progress is saved in:
+- `PRD.md` - completed tasks marked [x]
+- `progress.txt` - learnings from each iteration
+- Git commits - one per completed task
+
+Resume anytime:
 ```bash
-./ralph-status.sh
-```
-
-### Respond to Signal messages
-
-| Message | What to do |
-|---------|------------|
-| "Starting story #1..." | No response needed |
-| "Stuck: [problem]" | Reply with guidance |
-| "Completed all stories!" | Time to review |
-
-### Stop a feature
-
-```bash
-# Stop specific feature
-./ralph-stop.sh PROJECT_NAME-FEATURE_NAME
-
-# Example
-./ralph-stop.sh scooperhero-auth
-
-# Stop all
-./ralph-stop.sh all
+~/ralph-workflow/ralph.sh 20
 ```
 
 ---
@@ -175,12 +149,12 @@ docker logs -f ralph-scooperhero-auth
 ### 1. Review the work
 
 ```bash
-cd ~/worktrees/PROJECT_NAME/FEATURE_NAME
+cd ~/worktrees/ScooperHero/ratings
 
 # See commits
 git log --oneline
 
-# See all changes vs main
+# See all changes
 git diff main
 
 # Check the code
@@ -190,26 +164,15 @@ code .
 ### 2. Merge if happy
 
 ```bash
-# Go to original repo
-cd ~/Documents/Hangar2Apps-Github/PROJECT_NAME
-# or
-cd ~/Documents/ITG-GitHub/PROJECT_NAME
-
-# Merge the feature branch
-git merge feature/FEATURE_NAME
-
-# Push if desired
+cd ~/Documents/Hangar2Apps-Github/ScooperHero
+git merge feature/ratings
 git push
 ```
 
 ### 3. Clean up
 
 ```bash
-# Remove the worktree
-git worktree remove ~/worktrees/PROJECT_NAME/FEATURE_NAME
-
-# Remove the container (if not already stopped)
-docker rm ralph-PROJECT_NAME-FEATURE_NAME
+git worktree remove ~/worktrees/ScooperHero/ratings
 ```
 
 ---
@@ -218,56 +181,79 @@ docker rm ralph-PROJECT_NAME-FEATURE_NAME
 
 | Task | Command |
 |------|---------|
-| Start Signal API | `docker-compose up -d` |
-| Check Signal API | `curl http://localhost:8080/v1/about` |
-| Start feature | `./ralph-start.sh <project-path> <feature> "description"` |
-| Check all status | `./ralph-status.sh` |
-| View logs | `docker logs -f ralph-<project>-<feature>` |
-| Stop feature | `./ralph-stop.sh <project>-<feature>` |
-| Stop all | `./ralph-stop.sh all` |
-| Create detailed PRD | `./ralph-create-prd.sh ~/worktrees/<project>/<feature>` |
+| Create worktree | `git worktree add ~/worktrees/PROJECT/FEATURE -b feature/FEATURE` |
+| Go to worktree | `cd ~/worktrees/PROJECT/FEATURE` |
+| Create PRD | `claude` then "Create a PRD for: [feature]" |
+| Run Ralph | `~/ralph-workflow/ralph.sh 20` |
+| Stop Ralph | `Ctrl+C` |
+| Check progress | `cat PRD.md` or `cat progress.txt` |
+| Merge when done | `cd ~/original/repo && git merge feature/FEATURE` |
+| Clean up | `git worktree remove ~/worktrees/PROJECT/FEATURE` |
+
+---
+
+## PRD Tips
+
+### Right-sized tasks (ONE context window each):
+- Add a database column
+- Add a single UI component
+- Update one server action
+- Add a filter dropdown
+
+### Too big (split these):
+- "Build the dashboard" → schema, queries, UI, filters
+- "Add authentication" → schema, middleware, login UI, session
+- "Add drag and drop" → drag events, drop zones, state, persistence
+
+### Good acceptance criteria:
+- "Add `status` column with default 'pending'"
+- "Filter dropdown has options: All, Active, Completed"
+- "Typecheck passes"
+
+### Bad acceptance criteria:
+- "Works correctly"
+- "Good UX"
+- "Handles edge cases"
 
 ---
 
 ## Troubleshooting
 
-### Container exits immediately
+### Claude not finding PRD.md
 
+Make sure you're in the worktree directory:
 ```bash
-# Check why it failed
-docker logs ralph-PROJECT_NAME-FEATURE_NAME
+pwd  # should be ~/worktrees/PROJECT/FEATURE
+ls   # should see PRD.md
 ```
 
 ### Signal messages not sending
 
+Check Signal API:
 ```bash
-# Check Signal API is running
-docker ps | grep signal
-
-# Check it's on ralph-network
-docker network inspect ralph-network
-
-# Test sending manually
-curl -X POST http://localhost:8080/v2/send \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Test", "number": "+1BOTNUM", "recipients": ["+1YOURNUM"]}'
+curl http://localhost:9924/v1/about
 ```
 
-### Worktree conflicts
+### Context getting too big
 
+Your tasks are too large. Edit PRD.md and split into smaller stories.
+
+### Ralph keeps failing on same task
+
+Check progress.txt for error patterns. Add hints manually:
 ```bash
-# List all worktrees
-cd ~/Documents/Hangar2Apps-Github/PROJECT_NAME
-git worktree list
-
-# Remove a stale worktree
-git worktree remove ~/worktrees/PROJECT_NAME/FEATURE_NAME --force
+echo "## Hint: The API endpoint is /api/v2/tasks not /api/tasks" >> progress.txt
 ```
 
-### Need to restart a feature
+### Need to restart fresh
 
 ```bash
-./ralph-stop.sh PROJECT_NAME-FEATURE_NAME
-./ralph-start.sh ~/path/to/project FEATURE_NAME
-# It will detect existing worktree and ask to continue
+# Reset PRD checkboxes
+sed -i '' 's/\[x\]/[ ]/g' PRD.md
+
+# Clear progress
+echo "# Progress Log\n\n## Learnings\n\n---" > progress.txt
+
+# Restart
+~/ralph-workflow/ralph.sh 20
 ```
