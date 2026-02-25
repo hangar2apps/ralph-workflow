@@ -59,6 +59,15 @@ If your implementation requires ANY manual action from the user, add to progress
 
 Be specific - include exact SQL, exact env var names, exact commands needed.
 
+## Project Documentation
+
+Always maintain a SETUP.md file in the project root with:
+- **Setup Instructions**: Step-by-step guide for any required manual steps (account creation, SQL migrations, environment variables, API keys, etc.)
+- **Project Overview**: What the project is and what problem it solves
+- **Usage Guide**: How to use the completed features
+
+Update this file as you complete tasks. If it doesn't exist, create it. If you add new features that require setup or usage instructions, add them to SETUP.md.
+
 ## Signal Notifications
 
 Use the signal-me plugin to message me:
